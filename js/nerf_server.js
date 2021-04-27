@@ -57,7 +57,11 @@ function NeRF_render() {
     //get camera properties: view
     //get object translation.
     console.log(obj.matrixWorld);
-    console.log(camera_view.matrixWorld);
+    //console.log(camera_view.matrixWorld);
+    console.log(obj);
+    
+    var bbox = new THREE.Box3().setFromObject(obj);
+    console.log(bbox);
     //send those infomations to NeRF for rendering.
 
 }
@@ -86,6 +90,7 @@ function init() {
     controls_global_view.addEventListener('change', render);
     transformControl = new THREE.TransformControls(global_view, $('#scene')[0]);
     transformControl.addEventListener('change', render);
+
     transformControl.addEventListener('dragging-changed', function (event) {
         controls_global_view.enabled = !event.value;
     });
@@ -142,13 +147,13 @@ function init() {
     nerf_plot.add(nerf_image);
     nerf_plot.add(new THREE.AmbientLight(0xffffff));
 
-
     var ply_loader = new THREE.PLYLoader();
     ply_loader.setPropertyNameMapping({
         diffuse_red: 'red',
         diffuse_green: 'green',
         diffuse_blue: 'blue'
     });
+
     ply_loader.load('ply/lego.ply', function (geometry) {
         console.log(geometry.vertexColors)
         var pts_material = new THREE.PointsMaterial({ size: 0.005, vertexColors: THREE.VertexColors });
@@ -157,21 +162,10 @@ function init() {
     });
     ply_loader.load('ply/fortress.ply', function (geometry) {
         console.log(geometry.vertexColors)
-        var pts_material = new THREE.PointsMaterial({ size: 0.1, vertexColors: THREE.VertexColors });
-        obj = new THREE.Points(geometry, pts_material);
-        scene.add(obj)
+        var pts_material = new THREE.PointsMaterial({ size: 0.05, vertexColors: THREE.VertexColors });
+        env = new THREE.Points(geometry, pts_material);
+        scene.add(env)
     });
-
-
-
-    //ajax get obj and env
-    //   const loader = new PLYLoader();
-    //   loader.load('/dataset/format/00000012.ply', function ( geometry ) {
-    //     var material = new THREE.PointsMaterial( { size: 0.005 } );
-    //     material.vertexColors = true
-    //     var mesh = new THREE.Points(geometry, material)
-    //     scene.add(mesh)
-    //   } );
 
 
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -193,6 +187,7 @@ function init() {
     document.addEventListener('pointermove', onPointerMove);
     $(document).keydown(onKeyDown);
     transformControl.attach(obj);
+    transformControl.setSpace('local');
     render();
 }
 function onCameraUpdate() {
@@ -355,9 +350,10 @@ function onPointerMove(event) {
             transformControl.attach(object);
         }
     }
+    // else{
+    //     transformControl.detach(obj);
+    // }
 }
-
-
 
 $(window).resize(render);
 $(document).ready(init);
