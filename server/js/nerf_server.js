@@ -11,13 +11,6 @@ var obj;
 var env;
 var transformControl;
 
-
-
-const geometries = [
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.DodecahedronGeometry(0.5),
-];
-
 const point = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
 
@@ -27,8 +20,6 @@ const onDownPosition = new THREE.Vector2();
 const params = {
     render: NeRF_render,
 };
-
-
 class MinMaxGUIHelper {
     constructor(obj, minProp, maxProp, minDif) {
         this.obj = obj;
@@ -52,22 +43,30 @@ class MinMaxGUIHelper {
     }
 }
 
-function NeRF_render() {
-    //get object properties:local rotate
-    //get camera properties: view
-    //get object translation.
-    console.log(obj.matrixWorld);
-    //console.log(camera_view.matrixWorld);
-    console.log(obj);
-    
-    var bbox = new THREE.Box3().setFromObject(obj);
-    console.log(bbox);
-    //send those infomations to NeRF for rendering.
 
+
+function updateImage(data) {
+    alert('get reply');
+    console.log(data);
+    
 }
 
+function NeRF_render() {
+    //get camera
+    trans = obj.position;
+    rot = obj.quaternion;
+    scale = obj.scale;
+    //x,y,z.
+    var bbox = new THREE.Box3().setFromObject(obj);
+    var request = $.ajax({
+        method: "POST",
+        url: "api/render",
+        data: JSON.stringify({trans:trans,rotation:rot,scale:scale,bbox:bbox})
+    });
+    request.done(updateImage);
+}
 
-
+//Init function. Parsing parameters.
 
 function init() {
     canvas = $('#gl')[0]
@@ -153,15 +152,13 @@ function init() {
         diffuse_green: 'green',
         diffuse_blue: 'blue'
     });
-
-    ply_loader.load('ply/lego.ply', function (geometry) {
-        console.log(geometry.vertexColors)
+    ply_loader.load('ply/hotdog.ply', function (geometry) {
         var pts_material = new THREE.PointsMaterial({ size: 0.005, vertexColors: THREE.VertexColors });
         obj = new THREE.Points(geometry, pts_material);
         scene.add(obj)
     });
+    //bbox = new THREE.Box3().setFromObject(obj);
     ply_loader.load('ply/fortress.ply', function (geometry) {
-        console.log(geometry.vertexColors)
         var pts_material = new THREE.PointsMaterial({ size: 0.05, vertexColors: THREE.VertexColors });
         env = new THREE.Points(geometry, pts_material);
         scene.add(env)
@@ -265,17 +262,11 @@ function render() {
         const height = rect.bottom - rect.top;
         const left = rect.left;
         const bottom = renderer.domElement.clientHeight - rect.bottom;
-        // console.log(rect)
 
         renderer.setViewport(left, bottom, width, height);
         renderer.setScissor(left, bottom, width, height);
 
         camera_rig.visible = false;
-
-        //camera.aspect = width / height; // not changing in this example
-        //camera.updateProjectionMatrix();
-        // console.log(scene.userData.controls)
-        //scene.userData.controls.update();
         renderer.render(scene, camera_view);
     }
     {

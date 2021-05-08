@@ -1,5 +1,4 @@
 ( function () {
-
 	/**
  * Description: A THREE loader for PLY ASCII files (known as the Polygon
  * File Format or the Stanford Triangle Format).
@@ -25,16 +24,12 @@
  * } );
  *
  */
-
 	class PLYLoader extends THREE.Loader {
-
 		constructor( manager ) {
 
 			super( manager );
 			this.propertyNameMapping = {};
-
 		}
-
 		load( url, onLoad, onProgress, onError ) {
 
 			const scope = this;
