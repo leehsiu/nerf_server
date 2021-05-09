@@ -6,10 +6,12 @@ import signal
 import argparse
 import mimetypes
 from urllib.parse import urlparse
+import cv2
 import sys
 import json
 import re
-#import nerf_api
+import nerf_api
+import base64
 ROOT_DIR = './server'
 
 def guess_mimetype(path):
@@ -49,13 +51,16 @@ class ServerHandler(http.server.BaseHTTPRequestHandler):
         try:
             api_path = urlparse(self.path).path
             data_string = self.rfile.read(int(self.headers['Content-Length']))
+            data = json.loads(data_string.decode())
+            api_name = api_path.split('/')[-1]
+            ret = getattr(nerf_api,api_name)(data)
+            #opencv is BGR.
+            _,ret_buf = cv2.imencode('.jpeg',ret[:,:,::-1])
+            ret_buf = base64.b64encode(bytearray(ret_buf))
+            ret_buf = 'data:image/jpeg;base64,'+ret_buf.decode('utf-8')
             self.send_response(200)
             self.end_headers()
-            data = json.loads(data_string.decode())
-            print(data)
-            #api_name = api_path.split('/')[-1]
-            #ret = getattr(nerf_api,api_name)(data)
-            self.wfile.write("POST request for {}".format(self.path).encode('utf-8'))
+            self.wfile.write(bytes(ret_buf,'utf-8'))
         except IOError:
             self.send_error(404,'Unknown API {}'.format(self.path))
  

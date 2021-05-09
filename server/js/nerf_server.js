@@ -1,15 +1,20 @@
 var canvas, renderer;
 var scene;
-var nerf_plot;
+var nerfPlot;
 
-var camera_view;
-var global_view;
-var camera_rig;
-var nerf_image;
+var cameraView;
+var cameraViewDummy;
+
+var globalView;
+var cameraRig;
+var nerfImage;
 
 var obj;
 var env;
+var renderScale = 1.0;
 var transformControl;
+var startTime;
+
 
 const point = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
@@ -18,7 +23,8 @@ const pointer = new THREE.Vector2();
 const onUpPosition = new THREE.Vector2();
 const onDownPosition = new THREE.Vector2();
 const params = {
-    render: NeRF_render,
+    render: nerfRender,
+    scale: renderScale
 };
 class MinMaxGUIHelper {
     constructor(obj, minProp, maxProp, minDif) {
@@ -43,30 +49,80 @@ class MinMaxGUIHelper {
     }
 }
 
-
-
-function updateImage(data) {
-    alert('get reply');
-    console.log(data);
-    
+function updateImage(dataURI){
+    var loader = new THREE.TextureLoader();
+    loader.load(dataURI,updateTexture);
+    var endDate = new Date();
+    var timeElapse = (endDate.getTime()-startTime)/1000;
+    alert(['Render done in ',timeElapse,'seconds']);
 }
 
-function NeRF_render() {
+function nerfRender() {
     //get camera
-    trans = obj.position;
-    rot = obj.quaternion;
-    scale = obj.scale;
-    //x,y,z.
-    var bbox = new THREE.Box3().setFromObject(obj);
+
+    transCamera = cameraView.position;
+    rotCamera = cameraView.quaternion;
+    //get cameraK
+
+    //get object information.
+    transObj = obj.position;
+    rotObj = obj.quaternion;
+    scaleObj = obj.scale;
+    var bboxObj = new THREE.Box3().setFromObject(obj);
+    var postData = {
+        transCamera:transCamera,
+        rotCamera:rotCamera,
+        transObj:transObj,
+        rotObj:rotObj,
+        scaleObj:scaleObj,
+        bboxObj:bboxObj,
+        renderScale:params.scale
+    };
+    startTime = new Date().getTime();
     var request = $.ajax({
         method: "POST",
         url: "api/render",
-        data: JSON.stringify({trans:trans,rotation:rot,scale:scale,bbox:bbox})
+        data: JSON.stringify(postData)
     });
     request.done(updateImage);
 }
 
-//Init function. Parsing parameters.
+function initTexture(texture){
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.NearestFilter;
+    //texture.flipY = false;
+    var image = texture.image;
+    var imageMaterial = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+    var geometry = new THREE.PlaneGeometry(image.width, image.height);
+
+    nerfImage = new THREE.Mesh(geometry, imageMaterial);
+    nerfImage.position.x = 0;
+    nerfImage.position.y = 0;
+    nerfImage.position.z = -1;
+    nerfPlot.add(nerfImage);
+    render();
+}
+
+function updateTexture(texture){
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.NearestFilter;
+    //texture.flipY = false;
+    var image = texture.image;
+    var geometry = new THREE.PlaneGeometry(image.width, image.height);
+
+    nerfImage.material.map.dispose();
+    nerfImage.geometry.dispose();
+    nerfImage.material.map = texture;
+    nerfImage.geometry = geometry;
+    nerfImage.position.x = 0;
+    nerfImage.position.y = 0;
+    nerfImage.position.z = -1;
+    render();
+}
 
 function init() {
     canvas = $('#gl')[0]
@@ -74,27 +130,29 @@ function init() {
     scene = new THREE.Scene();
 
     //camera
-    camera_view = new THREE.PerspectiveCamera(50, aspect, 1, 50);
-    camera_view.position.set(0, 2, 2);
-    camera_rig = new THREE.CameraHelper(camera_view);
-    const controls_camera_view = new THREE.OrbitControls(camera_view, $('#camera')[0]);
-    controls_camera_view.addEventListener('change', render);
-    scene.add(camera_view);
-    scene.add(camera_rig);
+    cameraView = new THREE.PerspectiveCamera(50, aspect, 0.1, 1000);
+    cameraViewDummy = new THREE.PerspectiveCamera(50, aspect, 1, 2);
+    cameraView.position.set(0, 2, 2);
+    cameraViewDummy.position.set(0, 2, 2);
+    cameraRig = new THREE.CameraHelper(cameraViewDummy);
+    const controlsCameraView = new THREE.OrbitControls(cameraView, $('#camera')[0]);
+    controlsCameraView.addEventListener('change', render);
+    scene.add(cameraView);
+    scene.add(cameraRig);
 
     //global camera.
-    global_view = new THREE.PerspectiveCamera(50, aspect, 1, 1000);
-    global_view.position.set(0, 15, 15);
-    const controls_global_view = new THREE.OrbitControls(global_view, $('#scene')[0]);
-    controls_global_view.addEventListener('change', render);
-    transformControl = new THREE.TransformControls(global_view, $('#scene')[0]);
+    globalView = new THREE.PerspectiveCamera(50, aspect, 1, 1000);
+    globalView.position.set(0, 15, 15);
+    const controlsGlobalView = new THREE.OrbitControls(globalView, $('#scene')[0]);
+    controlsGlobalView.addEventListener('change', render);
+    transformControl = new THREE.TransformControls(globalView, $('#scene')[0]);
     transformControl.addEventListener('change', render);
 
     transformControl.addEventListener('dragging-changed', function (event) {
-        controls_global_view.enabled = !event.value;
+        controlsGlobalView.enabled = !event.value;
     });
 
-    scene.add(global_view);
+    scene.add(globalView);
     scene.add(transformControl);
 
 
@@ -119,64 +177,54 @@ function init() {
 
 
     //create the image viewer.
-    nerf_plot = new THREE.Scene();
+    nerfPlot = new THREE.Scene();
     var width = 4800;
     var height = 900;
-    const nerf_view = new THREE.OrthographicCamera(width / - 2, width / 2,
+    const nerfView = new THREE.OrthographicCamera(width / - 2, width / 2,
         height / 2, height / - 2, 1, 10);
-    nerf_view.position.set(0, 0, 1);
-    nerf_plot.userData.camera = nerf_view;
-    nerf_plot.add(nerf_view);
+    nerfView.position.set(0, 0, 1);
+    nerfPlot.userData.camera = nerfView;
+    nerfPlot.add(nerfView);
 
-    const controls_nerf = new THREE.MapControls(nerf_view, $('#nerf')[0]);
-    controls_nerf.addEventListener('change', render);
-    controls_nerf.minDistance = 2;
-    controls_nerf.maxDistance = 5;
-    controls_nerf.enableRotate = false;
+    const controlsNerf = new THREE.MapControls(nerfView, $('#nerf')[0]);
+    controlsNerf.addEventListener('change', render);
+    controlsNerf.minDistance = 2;
+    controlsNerf.maxDistance = 5;
+    controlsNerf.enableRotate = false;
 
-
-    var loader = new THREE.TextureLoader();
-    loader.crossOrigin = '';
-    const texture_plane = loader.load('img.png');
 
     //plane to display nerf_element
-    const geometry_plane = new THREE.PlaneGeometry(1920, 360, 1);
-    nerf_image = new THREE.Mesh(geometry_plane,
-        new THREE.MeshLambertMaterial({ map: texture_plane }))
-    nerf_plot.add(nerf_image);
-    nerf_plot.add(new THREE.AmbientLight(0xffffff));
-
-    var ply_loader = new THREE.PLYLoader();
-    ply_loader.setPropertyNameMapping({
+    var loader = new THREE.TextureLoader();
+    loader.load(
+        'title.png',
+        initTexture
+    )
+    var plyLoader = new THREE.PLYLoader();
+    plyLoader.setPropertyNameMapping({
         diffuse_red: 'red',
         diffuse_green: 'green',
         diffuse_blue: 'blue'
     });
-    ply_loader.load('ply/hotdog.ply', function (geometry) {
-        var pts_material = new THREE.PointsMaterial({ size: 0.005, vertexColors: THREE.VertexColors });
-        obj = new THREE.Points(geometry, pts_material);
+    plyLoader.load('ply/hotdog.ply', function (geometry) {
+        var ptsMaterial = new THREE.PointsMaterial({ size: 0.005, vertexColors: THREE.VertexColors });
+        obj = new THREE.Points(geometry, ptsMaterial);
         scene.add(obj)
     });
-    //bbox = new THREE.Box3().setFromObject(obj);
-    ply_loader.load('ply/fortress.ply', function (geometry) {
-        var pts_material = new THREE.PointsMaterial({ size: 0.05, vertexColors: THREE.VertexColors });
-        env = new THREE.Points(geometry, pts_material);
+    plyLoader.load('ply/fortress.ply', function (geometry) {
+        var ptsMaterial = new THREE.PointsMaterial({ size: 0.05, vertexColors: THREE.VertexColors });
+        env = new THREE.Points(geometry, ptsMaterial);
         scene.add(env)
     });
-
 
     renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
     renderer.setClearColor(0xffffff, 1);
     renderer.setPixelRatio(window.devicePixelRatio);
 
     const gui = new dat.GUI();
-    gui.add(params, 'render');
-    gui.add(camera_view, 'fov', 1, 180).onChange(onCameraUpdate);
-    const minMaxGUIHelper = new MinMaxGUIHelper(camera_view, 'near', 'far', 0.1);
-    gui.add(minMaxGUIHelper, 'min', 0.1, 50, 0.1).name('near').onChange(onCameraUpdate);
-    gui.add(minMaxGUIHelper, 'max', 0.1, 50, 0.1).name('far').onChange(onCameraUpdate);
+    gui.add(params,'render');
+    gui.add(params,'scale',0.01,1.0);
+    gui.add(cameraView,'fov',1,180).onChange(onCameraUpdate);
     gui.open();
-
 
     //Controls
     document.addEventListener('pointerdown', onPointerDown);
@@ -188,10 +236,76 @@ function init() {
     render();
 }
 function onCameraUpdate() {
-    camera_view.updateProjectionMatrix();
-    camera_rig.update();
+    //
+    //this.projectionMatrix.makePerspective( left, left + width, top, top - height, near, this.far );    
+    //this.projectionMatrixInverse.copy( this.projectionMatrix ).invert();
+    cameraView.updateProjectionMatrix();
+    cameraRig.update();
     render();
 }
+
+function updateSize() {
+    $('#scene,#camera').each(function () {
+        var view_width = $(this).width();
+        var view_height = view_width * 9 / 16;
+        $(this).css('height', view_height);
+    });
+    $('#nerf').css('height', $('#nerf').width() * 9 / 48)
+    const width = $('#container')[0].clientWidth;
+    const height = $('#container')[0].clientHeight;
+    //const height = canvas.clientHeight;
+    if (canvas.width !== width || canvas.height !== height) {
+        renderer.setSize(width, height, false);
+    }
+}
+
+function setViewportTo(renderObj,element){
+    const rect = element.getBoundingClientRect();
+        // check if it's offscreen. If so skip it
+    if (rect.bottom < 0 || rect.top > renderObj.domElement.clientHeight ||
+        rect.right < 0 || rect.left > renderObj.domElement.clientWidth) {
+        return; // it's off screen
+    }
+    // set the viewport
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    const left = rect.left;
+    const bottom = renderObj.domElement.clientHeight - rect.bottom;
+    renderObj.setViewport(left, bottom, width, height);
+    renderObj.setScissor(left, bottom, width, height);
+}
+
+function updateCameraRig(){
+    //copy camera
+    //cameraView.updateMatrixWorld();
+    cameraViewDummy.matrixWorld.copy(cameraView.matrixWorld);
+    cameraViewDummy.updateProjectionMatrix();
+    cameraRig.update();
+}
+
+function render() {
+    updateSize();
+    updateCameraRig();
+    canvas.style.transform = `translateY(${window.scrollY}px)`;
+    renderer.setClearColor(0xffffff);
+    renderer.setScissorTest(true);
+
+    setViewportTo(renderer,$('#camera')[0]);
+    cameraRig.visible = false;
+    transformControl.visible = false;
+    renderer.render(scene, cameraView);
+
+    setViewportTo(renderer,$('#scene')[0]);
+    transformControl.visible = true;
+    cameraRig.visible = true;
+    renderer.render(scene, globalView);
+
+    setViewportTo(renderer,$('#nerf')[0]);
+    renderer.render(nerfPlot, nerfPlot.userData.camera);
+}
+
+
+//keyboard handler
 function onKeyDown(event) {
     switch (event.keyCode) {
         case 84: // T
@@ -220,103 +334,8 @@ function onKeyDown(event) {
     }
 }
 
-function updateSize() {
-    $('#scene,#camera').each(function () {
-        var view_width = $(this).width();
-        var view_height = view_width * 9 / 16;
-        $(this).css('height', view_height);
-    });
-    $('#nerf').css('height', $('#nerf').width() * 9 / 48)
-
-    const width = $('#container')[0].clientWidth;
-    const height = $('#container')[0].clientHeight;
-    //const height = canvas.clientHeight;
-    if (canvas.width !== width || canvas.height !== height) {
-        renderer.setSize(width, height, false);
-    }
-}
-
-function render() {
-
-    updateSize();
-    canvas.style.transform = `translateY(${window.scrollY}px)`;
-
-    renderer.setClearColor(0xffffff);
-    renderer.setScissorTest(true);
-
-    {
-        // get the element that is a place holder for where we want to
-        // draw the scene
-        const element = $('#camera')[0];
-        // get its position relative to the page's viewport
-        const rect = element.getBoundingClientRect();
-
-        // check if it's offscreen. If so skip it
-        if (rect.bottom < 0 || rect.top > renderer.domElement.clientHeight ||
-            rect.right < 0 || rect.left > renderer.domElement.clientWidth) {
-            return; // it's off screen
-        }
-
-        // set the viewport
-        const width = rect.right - rect.left;
-        const height = rect.bottom - rect.top;
-        const left = rect.left;
-        const bottom = renderer.domElement.clientHeight - rect.bottom;
-
-        renderer.setViewport(left, bottom, width, height);
-        renderer.setScissor(left, bottom, width, height);
-
-        camera_rig.visible = false;
-        renderer.render(scene, camera_view);
-    }
-    {
-        // get the element that is a place holder for where we want to
-        // draw the scene
-        const element = $('#scene')[0];
-        // get its position relative to the page's viewport
-        const rect = element.getBoundingClientRect();
-
-        // check if it's offscreen. If so skip it
-        if (rect.bottom < 0 || rect.top > renderer.domElement.clientHeight ||
-            rect.right < 0 || rect.left > renderer.domElement.clientWidth) {
-            return; // it's off screen
-        }
-
-        // set the viewport
-        const width = rect.right - rect.left;
-        const height = rect.bottom - rect.top;
-        const left = rect.left;
-        const bottom = renderer.domElement.clientHeight - rect.bottom;
-        renderer.setViewport(left, bottom, width, height);
-        renderer.setScissor(left, bottom, width, height);
-        camera_rig.visible = true;
-        renderer.render(scene, global_view);
-    }
-    {
-        // get the element that is a place holder for where we want to
-        // draw the scene
-        const element = $('#nerf')[0];
-        // get its position relative to the page's viewport
-        const rect = element.getBoundingClientRect();
-
-        // check if it's offscreen. If so skip it
-        if (rect.bottom < 0 || rect.top > renderer.domElement.clientHeight ||
-            rect.right < 0 || rect.left > renderer.domElement.clientWidth) {
-            return; // it's off screen
-        }
-        // set the viewport
-        const width = rect.right - rect.left;
-        const height = rect.bottom - rect.top;
-        const left = rect.left;
-        const bottom = renderer.domElement.clientHeight - rect.bottom;
-        renderer.setViewport(left, bottom, width, height);
-        renderer.setScissor(left, bottom, width, height);
-        renderer.render(nerf_plot, nerf_plot.userData.camera)
-    }
-}
-
+//pointer handler
 function onPointerDown(event) {
-
     onDownPosition.x = event.clientX;
     onDownPosition.y = event.clientY;
 
@@ -333,18 +352,18 @@ function onPointerMove(event) {
     const height = rect.bottom - rect.top;
     pointer.x = (event.clientX - rect.left) / width * 2 - 1;
     pointer.y = - (event.clientY - rect.top) / height * 2 + 1;
-    raycaster.setFromCamera(pointer, global_view);
+    raycaster.setFromCamera(pointer, globalView);
     const intersects = raycaster.intersectObjects([obj]);
     if (intersects.length > 0) {
-        const object = intersects[0].object;
-        if (object !== transformControl.object) {
-            transformControl.attach(object);
-        }
+        //const object = intersects[0].object;
+        //if (object !== transformControl.object) {
+            transformControl.attach(obj);
+        //}
     }
     // else{
     //     transformControl.detach(obj);
     // }
 }
 
-$(window).resize(render);
 $(document).ready(init);
+$(window).resize(render);

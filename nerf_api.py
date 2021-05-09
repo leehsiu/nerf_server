@@ -19,8 +19,61 @@ from msranerf.models.nerf import NeRF
 from msranerf.utils.config import get_configs
 from msranerf.utils.geometry import *
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def create_nerfs(args, modelW):
+    """Instantiate NeRF's MLP model.
+    """
+    embed_fn, input_ch = get_embedder(args.multires, 0)
+    input_ch_views = 0
+    embeddirs_fn, input_ch_views = get_embedder(
+        args.multires_views, 0)
+    output_ch = 5
+    skips = [4]
 
+    def network_query_fn(inputs, viewdirs, network_fn):
+        return run_network(inputs, viewdirs, network_fn,
+                           embed_fn,
+                           embeddirs_fn,
+                           args.netchunk*args.n_gpus)
+
+    model_cfgs = []
+    for w in modelW:
+        model = NeRF(D=args.netdepth, W=args.netwidth,
+                     input_ch=input_ch, output_ch=output_ch, skips=skips,
+                     input_ch_views=input_ch_views, use_viewdirs=True)
+        #model = nn.DataParallel(model).to(device)
+        model = model.to(device)
+
+        model_fine = NeRF(D=args.netdepth_fine, W=args.netwidth_fine,
+                          input_ch=input_ch, output_ch=output_ch, skips=skips,
+                          input_ch_views=input_ch_views, use_viewdirs=True)
+        #model_fine = nn.DataParallel(model_fine).to(device)
+        model_fine = model_fine.to(device)
+
+        print('Loading NeRF from', w)
+        ckpt = torch.load(w)
+        # Load model
+        model.load_state_dict(ckpt['network_fn_state_dict'])
+        # if model_fine is not None:
+        model_fine.load_state_dict(ckpt['network_fine_state_dict'])
+
+        model_cfg = {
+            'network_query_fn': network_query_fn,
+            'network_fn': model,
+            'network_fine': model_fine,
+        }
+        model_cfgs.append(model_cfg)
+    return model_cfgs
+
+
+sys.argv = ['-f']
+args = get_configs()
+args.n_gpus = torch.cuda.device_count()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model_weights = []
+model_weights.append('/home/v-xiuli1/weights/nerf/fortress.tar')
+model_weights.append('/home/v-xiuli1/weights/nerf/hotdog.tar')
+torch.set_default_tensor_type('torch.cuda.FloatTensor')
+model_cfgs = create_nerfs(args,model_weights)
 
 def batchify(fn, chunk):
     """Constructs a version of 'fn' that applies to smaller batches.
@@ -94,10 +147,6 @@ def render_image(camK, W=None, H=None, c2w=None, render_cfgs=[], chunk=1024*32):
             bound[:, 0] = 1.0
             bound[:, 1] = -1.0
         else:
-            # bbox is already transformed.
-            # bbox = mat3_dot_vec3(pose[:3, :3], bbox)
-            # bbox = bbox*pose[3, 3]
-            # bbox[:3, :] = bbox[:3, :] + pose[:3, 3]
             bound = line_box_intersection(rays, bbox)
         bounds.append(bound)
     bounds = torch.cat(bounds, dim=-1)
@@ -115,13 +164,11 @@ def render_image(camK, W=None, H=None, c2w=None, render_cfgs=[], chunk=1024*32):
     ret_dict = {k: all_ret[k] for k in all_ret if k not in k_extract}
     return ret_list + [ret_dict]
 
-def render_path(camK, render_poses, render_cfgs, chunk, render_factor=0):
+def render_path(camK, c2w, render_cfgs, chunk, render_factor=0):
     # downsample for render efficency.
     if render_factor != 0:
         camK = camK/render_factor
     camK[2, 2] = 1.0
-    idx = np.random.randint(render_poses.shape[0])
-    c2w = render_poses[idx][:3,:4]
     rgb,acc,depth, _ = render_image(
         camK, c2w=c2w[:3, :4], render_cfgs=render_cfgs, chunk=chunk)
     rgb = rgb.cpu().numpy()
@@ -131,10 +178,16 @@ def render_path(camK, render_poses, render_cfgs, chunk, render_factor=0):
     rgb = to8b(rgb)
     acc = to8b(acc)
 
-    imageio.imwrite('rgb.png',rgb)
-    imageio.imwrite('acc.png',acc)
+    depth = 1./depth
+    depth_min = depth.min()
+    depth_max = depth.max()
+    depth = (depth - depth_min)/(depth_max-depth_min)
+    depth = (depth*255).astype(np.uint8)
+    depth = np.dstack((depth,depth,depth))
 
-    return
+    image_all = np.hstack((rgb,acc,depth))
+
+    return image_all
 
 def create_nerfs(args, modelW):
     """Instantiate NeRF's MLP model.
@@ -372,21 +425,12 @@ def render_rays(camK,
 
 
 def render(data):
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
-    sys.argv = []
-    args = get_configs()
-    # Multi-GPU
-    args.n_gpus = torch.cuda.device_count()
+
 
     dd = np.load('/home/v-xiuli1/databag/nerf/llff_camera.npz')
     render_poses = dd['camView']
     camK = dd['camK']
 
-    model_weights = []
-    model_weights.append('/home/v-xiuli1/weights/nerf/fortress.tar')
-    model_weights.append('/home/v-xiuli1/weights/nerf/hotdog.tar')
-
-    model_cfgs = create_nerfs(args, model_weights)
 
     # init bbox.
     # update object configs.
@@ -399,41 +443,50 @@ def render(data):
     bbox = torch.zeros((6, 3))
     expand_factor = 1.2
     for i in range(3):
-        bbox[i, 0] = (data['bbox']['max']['x'] + data['bbox']['min']['x'])/2.0
-        bbox[i, 1] = (data['bbox']['max']['y'] + data['bbox']['min']['y'])/2.0
-        bbox[i, 2] = (data['bbox']['max']['z'] + data['bbox']['min']['z'])/2.0
+        bbox[i, 0] = (data['bboxObj']['max']['x'] + data['bboxObj']['min']['x'])/2.0
+        bbox[i, 1] = (data['bboxObj']['max']['y'] + data['bboxObj']['min']['y'])/2.0
+        bbox[i, 2] = (data['bboxObj']['max']['z'] + data['bboxObj']['min']['z'])/2.0
 
-    bbox[3, 0] = (data['bbox']['max']['x'] -
-                  data['bbox']['min']['x'])*expand_factor
-    bbox[4, 1] = (data['bbox']['max']['y'] -
-                  data['bbox']['min']['y'])*expand_factor
-    bbox[5, 2] = (data['bbox']['max']['z'] -
-                  data['bbox']['min']['z'])*expand_factor
+    bbox[3, 0] = (data['bboxObj']['max']['x'] -
+                  data['bboxObj']['min']['x'])*expand_factor
+    bbox[4, 1] = (data['bboxObj']['max']['y'] -
+                  data['bboxObj']['min']['y'])*expand_factor
+    bbox[5, 2] = (data['bboxObj']['max']['z'] -
+                  data['bboxObj']['min']['z'])*expand_factor
 
-    bbox[0, 2] -= bbox[5,2]/2.0
-    bbox[1, 0] -= bbox[3,0]/2.0
-    bbox[2, 1] -= bbox[4,1]/2.0
+    bbox[0] -= bbox[5]/2.0
+    bbox[1] -= bbox[3]/2.0
+    bbox[2] -= bbox[4]/2.0
 
     pose = torch.zeros((4, 4))
-    pose[0, 3] = data['trans']['x']
-    pose[1, 3] = data['trans']['y']
-    pose[2, 3] = data['trans']['z']
+    pose[0, 3] = data['transObj']['x']
+    pose[1, 3] = data['transObj']['y']
+    pose[2, 3] = data['transObj']['z']
 
     quat = torch.zeros((1, 4))
-    quat[0, 0] = data['rotation']['_w']
-    quat[0, 1] = data['rotation']['_x']
-    quat[0, 2] = data['rotation']['_y']
-    quat[0, 3] = data['rotation']['_z']
+    quat[0, 0] = data['rotObj']['_w']
+    quat[0, 1] = data['rotObj']['_x']
+    quat[0, 2] = data['rotObj']['_y']
+    quat[0, 3] = data['rotObj']['_z']
     pose[:3, :3] = quat2mat(quat)[0]
-    pose[3, 3] = data['scale']['x']
+    pose[3, 3] = data['scaleObj']['x']
 
     model_cfgs[1].update(bbox=bbox)
     model_cfgs[1].update(pose=pose)
     model_cfgs[1].update(ndc=False)
 
-    render_poses = torch.Tensor(render_poses).to(device)
+    c2w = torch.eye(4)
+    c2w[0,3] = data['transCamera']['x']
+    c2w[1,3] = data['transCamera']['x']
+    quat = torch.zeros((1, 4))
+    quat[0, 0] = data['rotCamera']['_w']
+    quat[0, 1] = data['rotCamera']['_x']
+    quat[0, 2] = data['rotCamera']['_y']
+    quat[0, 3] = data['rotCamera']['_z']
+    c2w[:3, :3] = quat2mat(quat)[0]
+
     camK = torch.Tensor(camK).to(device)
 
     with torch.no_grad():
-        render_path(camK, render_poses,model_cfgs,args.chunk,1)
-        return
+        image = render_path(camK,c2w,model_cfgs,args.chunk,1./data['renderScale'])
+        return image
