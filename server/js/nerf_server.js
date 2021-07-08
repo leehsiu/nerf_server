@@ -15,13 +15,13 @@ var renderScale = 1.0;
 var transformControl;
 var startTime;
 
-
 const point = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
 
 const pointer = new THREE.Vector2();
 const onUpPosition = new THREE.Vector2();
 const onDownPosition = new THREE.Vector2();
+
 const params = {
     render: nerfRender,
     scale: renderScale
@@ -59,16 +59,17 @@ function updateImage(dataURI){
 
 function nerfRender() {
     //get camera
-
     transCamera = cameraView.position;
     rotCamera = cameraView.quaternion;
-    //get cameraK
 
     //get object information.
     transObj = obj.position;
     rotObj = obj.quaternion;
     scaleObj = obj.scale;
     var bboxObj = new THREE.Box3().setFromObject(obj);
+
+    //customize other controllers here.
+    //I recommend dat.gui
     var postData = {
         transCamera:transCamera,
         rotCamera:rotCamera,
@@ -78,6 +79,8 @@ function nerfRender() {
         bboxObj:bboxObj,
         renderScale:params.scale
     };
+
+    //Post parameters to python api functions
     startTime = new Date().getTime();
     var request = $.ajax({
         method: "POST",
@@ -110,7 +113,6 @@ function updateTexture(texture){
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.NearestFilter;
-    //texture.flipY = false;
     var image = texture.image;
     var geometry = new THREE.PlaneGeometry(image.width, image.height);
 
@@ -155,8 +157,7 @@ function init() {
     scene.add(globalView);
     scene.add(transformControl);
 
-
-    //create grid and light
+    //world grid and light
     scene.add(new THREE.AmbientLight(0xf0f0f0));
     const light = new THREE.SpotLight(0xffffff, 1.5);
     light.position.set(0, 1500, 200);
@@ -175,8 +176,7 @@ function init() {
     grid.material.transparent = true;
     scene.add(grid);
 
-
-    //create the image viewer.
+    //The image viewer.
     nerfPlot = new THREE.Scene();
     var width = 4800;
     var height = 900;
@@ -193,12 +193,14 @@ function init() {
     controlsNerf.enableRotate = false;
 
 
-    //plane to display nerf_element
     var loader = new THREE.TextureLoader();
     loader.load(
         'title.png',
         initTexture
     )
+
+    //load the object point and env point cloud.
+    //Can be replaced by simple geometry such as a box
     var plyLoader = new THREE.PLYLoader();
     plyLoader.setPropertyNameMapping({
         diffuse_red: 'red',
@@ -220,13 +222,15 @@ function init() {
     renderer.setClearColor(0xffffff, 1);
     renderer.setPixelRatio(window.devicePixelRatio);
 
+    //dat.GUI() for interactive control
     const gui = new dat.GUI();
     gui.add(params,'render');
     gui.add(params,'scale',0.01,1.0);
     gui.add(cameraView,'fov',1,180).onChange(onCameraUpdate);
     gui.open();
 
-    //Controls
+
+    //start
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('pointerup', onPointerUp);
     document.addEventListener('pointermove', onPointerMove);
@@ -236,9 +240,6 @@ function init() {
     render();
 }
 function onCameraUpdate() {
-    //
-    //this.projectionMatrix.makePerspective( left, left + width, top, top - height, near, this.far );    
-    //this.projectionMatrixInverse.copy( this.projectionMatrix ).invert();
     cameraView.updateProjectionMatrix();
     cameraRig.update();
     render();
@@ -276,8 +277,6 @@ function setViewportTo(renderObj,element){
 }
 
 function updateCameraRig(){
-    //copy camera
-    //cameraView.updateMatrixWorld();
     cameraViewDummy.matrixWorld.copy(cameraView.matrixWorld);
     cameraViewDummy.updateProjectionMatrix();
     cameraRig.update();
@@ -334,7 +333,6 @@ function onKeyDown(event) {
     }
 }
 
-//pointer handler
 function onPointerDown(event) {
     onDownPosition.x = event.clientX;
     onDownPosition.y = event.clientY;
@@ -354,6 +352,8 @@ function onPointerMove(event) {
     pointer.y = - (event.clientY - rect.top) / height * 2 + 1;
     raycaster.setFromCamera(pointer, globalView);
     const intersects = raycaster.intersectObjects([obj]);
+
+    //to handle multiple objects.
     if (intersects.length > 0) {
         //const object = intersects[0].object;
         //if (object !== transformControl.object) {

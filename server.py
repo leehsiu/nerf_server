@@ -1,5 +1,4 @@
 import os
-import datetime
 import http.server
 import socketserver
 import signal
@@ -9,13 +8,13 @@ from urllib.parse import urlparse
 import cv2
 import sys
 import json
-import re
 import nerf_api
 import base64
 ROOT_DIR = './server'
 
+
 def guess_mimetype(path):
-    #default.
+    # default.
     mime_type = mimetypes.guess_type(path)[0]
     if path.endswith('.ply'):
         mime_type = 'text/plain'
@@ -24,54 +23,52 @@ def guess_mimetype(path):
 
 class ServerHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        #discuss, as path always start with "/"
-        if self.path=='/':
+        if self.path == '/':
             self.path = "/index.html"
-        #response api
+        # response api
         try:
             file_path = urlparse(self.path).path
-            if(file_path=='/'):
+            if(file_path == '/'):
                 file_path = "/index.html"
             mime_type = guess_mimetype(file_path)
             if mime_type:
-                file_path = file_path[1:] if file_path[0]=='/' else file_path
-                with open(os.path.join(ROOT_DIR,file_path),'rb') as f:
+                file_path = file_path[1:] if file_path[0] == '/' else file_path
+                with open(os.path.join(ROOT_DIR, file_path), 'rb') as f:
                     self.send_response(200)
-                    self.send_header('Content-type',mime_type)
+                    self.send_header('Content-type', mime_type)
                     self.end_headers()
                     self.wfile.write(f.read())
         except IOError:
-            self.send_error(404,'File Not Fould {}'.format(self.path))
-    
+            self.send_error(404, 'File Not Fould {}'.format(self.path))
+
     def do_HEAD(self):
         self.send_response(200)
-        self.send_header('Content-type','text/html')
+        self.send_header('Content-type', 'text/html')
         self.end_headers()
+
     def do_POST(self):
         try:
             api_path = urlparse(self.path).path
             data_string = self.rfile.read(int(self.headers['Content-Length']))
             data = json.loads(data_string.decode())
             api_name = api_path.split('/')[-1]
-            ret = getattr(nerf_api,api_name)(data)
-            #opencv is BGR.
-            _,ret_buf = cv2.imencode('.jpeg',ret[:,:,::-1])
+            ret = getattr(nerf_api, api_name)(data)
+            # default color format in opencv is BGR.
+            _, ret_buf = cv2.imencode('.jpeg', ret[:, :, ::-1])
             ret_buf = base64.b64encode(bytearray(ret_buf))
             ret_buf = 'data:image/jpeg;base64,'+ret_buf.decode('utf-8')
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(bytes(ret_buf,'utf-8'))
+            self.wfile.write(bytes(ret_buf, 'utf-8'))
         except IOError:
-            self.send_error(404,'Unknown API {}'.format(self.path))
- 
-    #silent
-    def log_message(self,format,*args):
+            self.send_error(404, 'Unknown API {}'.format(self.path))
+
+    # silent
+    def log_message(self, format, *args):
         return
 
 
-
 def parse_args():
-    file_path = os.path.dirname(__file__)
     parser = argparse.ArgumentParser(description="")
     parser.add_argument(
         '--port',
@@ -83,15 +80,15 @@ def parse_args():
     return args
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
     args = parse_args()
 
     socketserver.ThreadingTCPServer.allow_reuse_address = True
 
-    server = socketserver.ThreadingTCPServer(('',args.port),ServerHandler)
+    server = socketserver.ThreadingTCPServer(('', args.port), ServerHandler)
     server.daemon_threads = True
 
-    def signal_handler(signal,frame):
+    def signal_handler(signal, frame):
         print('Shutting down NeRFServer(Ctrl+C Pressed)')
         try:
             if(server):
@@ -99,8 +96,8 @@ if __name__=='__main__':
         finally:
             exit(0)
 
-    signal.signal(signal.SIGINT,signal_handler)
-    print('starting NeRFServer on port:',args.port)
+    signal.signal(signal.SIGINT, signal_handler)
+    print('starting NeRFServer on port:', args.port)
 
     try:
         while True:

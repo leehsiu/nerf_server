@@ -1,13 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 	<head>
-		<title>MSRA NeRF Editor</title>
+		<title>NeRF Editor</title>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 		<link type="text/css" rel="stylesheet" href="css/main.css">
+		<script src='js/three.min.js'></script>
 		<script src='js/jquery.min.js'></script>
+        <script src='js/dat.gui.min.js'></script>
+        <script src='js/TransformControls.js'></script>
+        <script src='js/OrbitControls.js'></script>
+        <script src='js/PLYLoader.js'></script>
 	</head>
 	<body>
-
+        <canvas id='gl'></canvas>
+        <div id='container'>
+            <div id='camera'>
+            </div>
+            <div id='scene'>
+            </div>
+            <div id='nerf'>
+            </div>
+        </div>
+		<script src='js/nerf_server.js'></script>		
 	</body>
 </html>
